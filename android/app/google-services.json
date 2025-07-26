@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "185155620231",
+    "firebase_url": "https://spade-attendance-app-default-rtdb.firebaseio.com",
+    "project_id": "spade-attendance-app",
+    "storage_bucket": "spade-attendance-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:185155620231:android:e85ceb90ec58d6f51f5722",
+        "android_client_info": {
+          "package_name": "com.example.attendance_scanner_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCGz_yfY4Exom01aaFO_8qjGwGIkJP4YHI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:185155620231:android:6f86a22d4d752c4d1f5722",
+        "android_client_info": {
+          "package_name": "com.example.spade_attendence_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCGz_yfY4Exom01aaFO_8qjGwGIkJP4YHI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
