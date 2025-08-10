@@ -62,7 +62,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 value: 'profile',
                 child: Row(
                   children: [
-                    Icon(Icons.person),
+                    Icon(Icons.person,color: Colors.black),
                     SizedBox(width: 8),
                     Text('Profile'),
                   ],
@@ -72,7 +72,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                 value: 'logout',
                 child: Row(
                   children: [
-                    Icon(Icons.logout),
+                    Icon(Icons.logout, color: Colors.black),
                     SizedBox(width: 8),
                     Text('Logout'),
                   ],
@@ -289,7 +289,7 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
               children: [
                 Row(
                   children: [
-                    Expanded(
+                    Flexible(
                       child: CustomButton(
                         text: 'Add Admin',
                         icon: Icons.person_add,
@@ -305,9 +305,9 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                       ),
                     ),
                     SizedBox(width: 16),
-                    Expanded(
+                    Flexible(
                       child: CustomButton(
-                        text: 'Manage Admins',
+                        text: 'Manage',
                         icon: Icons.manage_accounts,
                         onPressed: () {
                           Navigator.push(
