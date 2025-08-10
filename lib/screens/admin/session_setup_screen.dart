@@ -61,7 +61,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Session created successfully!'),
+            content: Text('Session created successfully for ${_selectedDate.year}!'),
             backgroundColor: Colors.green,
           ),
         );
@@ -81,6 +81,28 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Setup Session'),
+        // **NEW: Show selected year in app bar**
+        actions: [
+          Consumer<SessionProvider>(
+            builder: (context, sessionProvider, child) {
+              return Container(
+                margin: EdgeInsets.only(right: 16),
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text(
+                  '${_selectedDate.year}',
+                  style: TextStyle(
+                    color: Theme.of(context).primaryColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.all(16),
@@ -113,7 +135,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                               ),
                             ),
                             Text(
-                              'Configure attendance session details',
+                              'Configure attendance session details for ${_selectedDate.year}',
                               style: TextStyle(
                                 color: Colors.grey[600],
                               ),
@@ -149,7 +171,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
               
               SizedBox(height: 24),
               
-              // Date Selection
+              // **ENHANCED: Date Selection with year indicator**
               Text(
                 'Session Date',
                 style: TextStyle(
@@ -164,23 +186,83 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
                 child: Container(
                   padding: EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey[300]!),
+                    border: Border.all(
+                      color: Colors.grey[300]!,
+                      width: 1.5,
+                    ),
                     borderRadius: BorderRadius.circular(8),
+                    color: _selectedDate.year != DateTime.now().year 
+                        ? Theme.of(context).primaryColor.withOpacity(0.05)
+                        : null,
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.calendar_today, color: Colors.grey[600]),
-                      SizedBox(width: 12),
-                      Text(
-                        DateHelpers.formatDate(_selectedDate),
-                        style: TextStyle(fontSize: 16),
+                      Icon(
+                        Icons.calendar_today, 
+                        color: _selectedDate.year != DateTime.now().year
+                            ? Theme.of(context).primaryColor
+                            : Colors.grey[600],
                       ),
-                      Spacer(),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              DateHelpers.formatDate(_selectedDate),
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: _selectedDate.year != DateTime.now().year
+                                    ? FontWeight.w500
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            if (_selectedDate.year != DateTime.now().year)
+                              Text(
+                                'Year: ${_selectedDate.year}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Theme.of(context).primaryColor,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                       Icon(Icons.arrow_drop_down, color: Colors.grey[600]),
                     ],
                   ),
                 ),
               ),
+              
+              // **NEW: Year selection helper**
+              if (_selectedDate.year != DateTime.now().year)
+                Container(
+                  margin: EdgeInsets.only(top: 8),
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, 
+                           color: Colors.amber[700], 
+                           size: 16),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'This session will be stored under ${_selectedDate.year} collection',
+                          style: TextStyle(
+                            color: Colors.amber[700],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               
               SizedBox(height: 24),
               
@@ -289,26 +371,50 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
               
               SizedBox(height: 16),
               
-              // Info text
+              // **ENHANCED: Info text with year context**
               Container(
                 padding: EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   color: Colors.blue.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Row(
+                child: Column(
                   children: [
-                    Icon(Icons.info, color: Colors.blue),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Your current location will be recorded and used for attendance verification.',
-                        style: TextStyle(
-                          color: Colors.blue[700],
-                          fontSize: 14,
+                    Row(
+                      children: [
+                        Icon(Icons.info, color: Colors.blue),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Your current location will be recorded and used for attendance verification.',
+                            style: TextStyle(
+                              color: Colors.blue[700],
+                              fontSize: 14,
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
+                    if (_selectedDate.year != DateTime.now().year) ...[
+                      SizedBox(height: 8),
+                      Divider(color: Colors.blue.withOpacity(0.3)),
+                      SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(Icons.folder_outlined, color: Colors.blue, size: 20),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'This session will be organized under the ${_selectedDate.year} collection in your database.',
+                              style: TextStyle(
+                                color: Colors.blue[700],
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -319,12 +425,16 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     );
   }
 
+  // **ENHANCED: Date picker with extended range**
   Future<void> _selectDate(BuildContext context) async {
     final DateTime? picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(Duration(days: 365)),
+      firstDate: DateTime(DateTime.now().year - 2), // Allow 2 years back
+      lastDate: DateTime(DateTime.now().year + 2, 12, 31), // Allow 2 years forward
+      helpText: 'Select Session Date',
+      confirmText: 'SET DATE',
+      cancelText: 'CANCEL',
     );
     if (picked != null && picked != _selectedDate) {
       setState(() {
@@ -337,6 +447,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: _startTime,
+      helpText: 'Select Start Time',
     );
     if (picked != null && picked != _startTime) {
       setState(() {
@@ -357,6 +468,7 @@ class _SessionSetupScreenState extends State<SessionSetupScreen> {
     final TimeOfDay? picked = await showTimePicker(
       context: context,
       initialTime: _endTime,
+      helpText: 'Select End Time',
     );
     if (picked != null && picked != _endTime) {
       // Validate end time is after start time

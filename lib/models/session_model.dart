@@ -25,6 +25,30 @@ class SessionModel {
     this.adminLocation,
   });
 
+  DateTime get date => sessionDate;
+
+  // **NEW: Get year from session date for year-based organization**
+  String get year => sessionDate.year.toString();
+
+  // **NEW: Check if session is from current year**
+  bool get isCurrentYear => sessionDate.year == DateTime.now().year;
+
+  // **NEW: Get formatted date string**
+  String get formattedDate => '${sessionDate.day}/${sessionDate.month}/${sessionDate.year}';
+
+  // **NEW: Get display name with year context**
+  String get displayName => isCurrentYear 
+      ? sessionName
+      : '$sessionName (${sessionDate.year})';
+
+  // **NEW: Check if session is today**
+  bool get isToday {
+    DateTime now = DateTime.now();
+    return sessionDate.year == now.year &&
+           sessionDate.month == now.month &&
+           sessionDate.day == now.day;
+  }
+
   factory SessionModel.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
     
@@ -55,9 +79,12 @@ class SessionModel {
       'createdAt': Timestamp.fromDate(createdAt),
       'isActive': isActive,
       'adminLocation': adminLocation,
+      // **NEW: Add year field for easier querying (optional)**
+      'year': sessionDate.year,
     };
   }
 
+  // **ENHANCED: copyWith with better null handling**
   SessionModel copyWith({
     String? id,
     String? companyName,
@@ -82,5 +109,75 @@ class SessionModel {
       isActive: isActive ?? this.isActive,
       adminLocation: adminLocation ?? this.adminLocation,
     );
+  }
+
+  // **NEW: JSON serialization support**
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'companyName': companyName,
+      'sessionName': sessionName,
+      'sessionDate': sessionDate.toIso8601String(),
+      'startTime': startTime,
+      'endTime': endTime,
+      'adminId': adminId,
+      'createdAt': createdAt.toIso8601String(),
+      'isActive': isActive,
+      'adminLocation': adminLocation,
+      'year': sessionDate.year,
+    };
+  }
+
+  factory SessionModel.fromJson(Map<String, dynamic> json) {
+    return SessionModel(
+      id: json['id'] ?? '',
+      companyName: json['companyName'] ?? '',
+      sessionName: json['sessionName'] ?? '',
+      sessionDate: DateTime.parse(json['sessionDate'] ?? DateTime.now().toIso8601String()),
+      startTime: json['startTime'] ?? '',
+      endTime: json['endTime'] ?? '',
+      adminId: json['adminId'] ?? '',
+      createdAt: DateTime.parse(json['createdAt'] ?? DateTime.now().toIso8601String()),
+      isActive: json['isActive'] ?? true,
+      adminLocation: json['adminLocation'] != null 
+          ? Map<String, double>.from(json['adminLocation'])
+          : null,
+    );
+  }
+
+  // **NEW: Comparison and equality**
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is SessionModel &&
+        other.id == id &&
+        other.companyName == companyName &&
+        other.sessionName == sessionName &&
+        other.sessionDate == sessionDate &&
+        other.startTime == startTime &&
+        other.endTime == endTime &&
+        other.adminId == adminId &&
+        other.createdAt == createdAt &&
+        other.isActive == isActive;
+  }
+
+  @override
+  int get hashCode {
+    return Object.hash(
+      id,
+      companyName,
+      sessionName,
+      sessionDate,
+      startTime,
+      endTime,
+      adminId,
+      createdAt,
+      isActive,
+    );
+  }
+
+  @override
+  String toString() {
+    return 'SessionModel(id: $id, companyName: $companyName, sessionName: $sessionName, sessionDate: $sessionDate, year: $year, isActive: $isActive)';
   }
 }

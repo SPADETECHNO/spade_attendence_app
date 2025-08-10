@@ -28,18 +28,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final attendanceProvider = context.read<AttendanceProvider>();
 
     if (authProvider.user != null) {
+      // Load sessions for current selected year
       sessionProvider.loadAdminSessions(authProvider.user!.uid);
       
-      // Load today's attendance - Updated method call
+      // Load today's attendance
       DateTime now = DateTime.now();
       DateTime startOfDay = DateTime(now.year, now.month, now.day);
       DateTime endOfDay = startOfDay.add(Duration(days: 1));
       
-      // Fixed method call with correct parameter order
       attendanceProvider.loadAttendanceByDateRange(
         startOfDay,
         endOfDay,
-        adminId: authProvider.user!.uid, // Pass adminId as named parameter
+        adminId: authProvider.user!.uid,
       );
     }
   }
@@ -50,15 +50,117 @@ class _AdminDashboardState extends State<AdminDashboard> {
       appBar: AppBar(
         title: Text('Admin Dashboard'),
         actions: [
+          // Year selector dropdown
+          Consumer<SessionProvider>(
+            builder: (context, sessionProvider, child) {
+              return PopupMenuButton<String>(
+                icon: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).primaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        sessionProvider.selectedYear,
+                        style: TextStyle(
+                          color: Theme.of(context).primaryColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                      SizedBox(width: 4),
+                      Icon(
+                        Icons.arrow_drop_down,
+                        color: Theme.of(context).primaryColor,
+                        size: 18,
+                      ),
+                    ],
+                  ),
+                ),
+                onSelected: (year) {
+                  sessionProvider.changeSelectedYear(year);
+                },
+                itemBuilder: (context) {
+                  List<String> years = sessionProvider.availableYears;
+                  if (years.isEmpty) {
+                    years = [DateTime.now().year.toString()];
+                  }
+                  
+                  return years.map((year) => PopupMenuItem<String>(
+                    value: year,
+                    child: Row(
+                      children: [
+                        Icon(
+                          year == sessionProvider.selectedYear 
+                              ? Icons.radio_button_checked 
+                              : Icons.radio_button_unchecked,
+                          size: 18,
+                          color: year == sessionProvider.selectedYear 
+                              ? Theme.of(context).primaryColor 
+                              : Colors.grey,
+                        ),
+                        SizedBox(width: 8),
+                        Text(year),
+                        if (year == DateTime.now().year.toString()) ...[
+                          SizedBox(width: 8),
+                          Container(
+                            padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.blue,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Current',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  )).toList();
+                },
+              );
+            },
+          ),
           PopupMenuButton(
             onSelected: (value) {
               if (value == 'profile') {
                 _showProfileDialog();
               } else if (value == 'logout') {
                 _logout();
+              } else if (value == 'load_all_years') {
+                _loadAllYearsSessions();
+              } else if (value == 'refresh') {
+                _loadDashboardData();
               }
             },
             itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'refresh',
+                child: Row(
+                  children: [
+                    Icon(Icons.refresh),
+                    SizedBox(width: 8),
+                    Text('Refresh'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'load_all_years',
+                child: Row(
+                  children: [
+                    Icon(Icons.history),
+                    SizedBox(width: 8),
+                    Text('Load All Years'),
+                  ],
+                ),
+              ),
               PopupMenuItem(
                 value: 'profile',
                 child: Row(
@@ -93,6 +195,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildWelcomeCard(),
+              SizedBox(height: 16),
+              _buildYearSelector(),
               SizedBox(height: 16),
               _buildQuickActions(),
               SizedBox(height: 16),
@@ -167,6 +271,44 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  Widget _buildYearSelector() {
+    return Consumer<SessionProvider>(
+      builder: (context, sessionProvider, child) {
+        if (sessionProvider.availableYears.isEmpty) {
+          return SizedBox.shrink();
+        }
+
+        return Card(
+          child: Padding(
+            padding: EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Viewing Sessions for ${sessionProvider.selectedYear}',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (sessionProvider.availableYears.length > 1) ...[
+                  SizedBox(height: 8),
+                  Text(
+                    'Available years: ${sessionProvider.availableYears.join(", ")}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildQuickActions() {
     return Card(
       child: Padding(
@@ -210,14 +352,33 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             : Colors.grey,
                         onPressed: sessionProvider.hasActiveSession
                             ? () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => ScannerScreen(),
+                                // **FIXED: Ensure sessionId is properly passed**
+                                if (sessionProvider.currentSession?.id != null) {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => ScannerScreen(
+                                        sessionId: sessionProvider.currentSession!.id,
+                                      ),
+                                    ),
+                                  );
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Session ID not available. Please select a session first.'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
+                                }
+                              }
+                            : () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Please create or select a session first.'),
+                                    backgroundColor: Colors.orange,
                                   ),
                                 );
-                              }
-                            : null,
+                              },
                       );
                     },
                   ),
@@ -250,6 +411,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    Spacer(),
+                    // Year badge for current session
+                    if (sessionProvider.hasActiveSession)
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).primaryColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          sessionProvider.currentSession!.sessionDate.year.toString(),
+                          style: TextStyle(
+                            color: Theme.of(context).primaryColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
                 SizedBox(height: 12),
@@ -287,22 +466,74 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           ),
                         ],
                       ),
+                      // **NEW: Session actions**
+                      SizedBox(height: 12),
+                      Row(
+                        children: [
+                          if (sessionProvider.isSessionActive())
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                sessionProvider.endCurrentSession();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Session ended successfully'),
+                                    backgroundColor: Colors.blue,
+                                  ),
+                                );
+                              },
+                              icon: Icon(Icons.stop, size: 16),
+                              label: Text('End Session'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                        ],
+                      ),
                     ],
                   )
                 else
-                  Text(
-                    'No active session. Create a new session to start scanning.',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontStyle: FontStyle.italic,
-                    ),
+                  Column(
+                    children: [
+                      Text(
+                        'No active session. Create a new session to start scanning.',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                      SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => SessionSetupScreen(),
+                            ),
+                          );
+                        },
+                        icon: Icon(Icons.add),
+                        label: Text('Create Session'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Theme.of(context).primaryColor,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
                 if (sessionProvider.error != null)
                   Padding(
                     padding: EdgeInsets.only(top: 8),
-                    child: Text(
-                      'Error: ${sessionProvider.error}',
-                      style: TextStyle(color: Colors.red, fontSize: 12),
+                    child: Container(
+                      padding: EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Error: ${sessionProvider.error}',
+                        style: TextStyle(color: Colors.red, fontSize: 12),
+                      ),
                     ),
                   ),
               ],
@@ -347,28 +578,54 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ],
                 ),
                 SizedBox(height: 16),
-                Row(
+                Column(
                   children: [
-                    Expanded(
-                      child: _buildStatItem('Today', stats['today'] ?? 0, Colors.blue),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildStatItem('Today', stats['today'] ?? 0, Colors.blue),
+                        ),
+                        Expanded(
+                          child: _buildStatItem('This Week', stats['thisWeek'] ?? 0, Colors.green),
+                        ),
+                        Expanded(
+                          child: _buildStatItem('This Month', stats['thisMonth'] ?? 0, Colors.orange),
+                        ),
+                        Expanded(
+                          child: _buildStatItem('Total', stats['total'] ?? 0, Colors.purple),
+                        ),
+                      ],
                     ),
-                    Expanded(
-                      child: _buildStatItem('This Week', stats['thisWeek'] ?? 0, Colors.green),
-                    ),
-                    Expanded(
-                      child: _buildStatItem('This Month', stats['thisMonth'] ?? 0, Colors.orange),
-                    ),
-                    Expanded(
-                      child: _buildStatItem('Total', stats['total'] ?? 0, Colors.purple),
-                    ),
+                    if (stats['pending'] != null && stats['pending']! > 0) ...[
+                      SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildStatItem('Verified', stats['verified'] ?? 0, Colors.teal),
+                          ),
+                          Expanded(
+                            child: _buildStatItem('Pending', stats['pending'] ?? 0, Colors.amber),
+                          ),
+                          Expanded(child: SizedBox()),
+                          Expanded(child: SizedBox()),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
                 if (attendanceProvider.error != null)
                   Padding(
                     padding: EdgeInsets.only(top: 8),
-                    child: Text(
-                      'Error: ${attendanceProvider.error}',
-                      style: TextStyle(color: Colors.red, fontSize: 12),
+                    child: Container(
+                      padding: EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Error: ${attendanceProvider.error}',
+                        style: TextStyle(color: Colors.red, fontSize: 12),
+                      ),
                     ),
                   ),
               ],
@@ -396,6 +653,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             fontSize: 12,
             color: Colors.grey[600],
           ),
+          textAlign: TextAlign.center,
         ),
       ],
     );
@@ -432,15 +690,49 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    Spacer(),
+                    Text(
+                      sessionProvider.selectedYear,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
                   ],
                 ),
                 SizedBox(height: 16),
                 if (recentSessions.isEmpty)
-                  Text(
-                    'No sessions created yet.',
-                    style: TextStyle(
-                      color: Colors.grey[600],
-                      fontStyle: FontStyle.italic,
+                  Center(
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.event_busy,
+                          size: 48,
+                          color: Colors.grey[400],
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'No sessions created for ${sessionProvider.selectedYear} yet.',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: 12),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => SessionSetupScreen(),
+                              ),
+                            );
+                          },
+                          icon: Icon(Icons.add),
+                          label: Text('Create First Session'),
+                        ),
+                      ],
                     ),
                   )
                 else
@@ -451,27 +743,79 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     separatorBuilder: (context, index) => Divider(),
                     itemBuilder: (context, index) {
                       var session = recentSessions[index];
+                      bool isCurrentSession = sessionProvider.currentSession?.id == session.id;
+                      
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         leading: CircleAvatar(
-                          backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+                          backgroundColor: isCurrentSession 
+                              ? Colors.green.withOpacity(0.1)
+                              : Theme.of(context).primaryColor.withOpacity(0.1),
                           child: Icon(
-                            Icons.event,
-                            color: Theme.of(context).primaryColor,
+                            isCurrentSession ? Icons.play_circle_fill : Icons.event,
+                            color: isCurrentSession 
+                                ? Colors.green
+                                : Theme.of(context).primaryColor,
                           ),
                         ),
-                        title: Text(session.sessionName ?? 'Session'),
+                        title: Row(
+                          children: [
+                            Expanded(child: Text(session.sessionName ?? 'Session')),
+                            if (isCurrentSession)
+                              Container(
+                                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.green,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  'ACTIVE',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                         subtitle: Text(
                           '${session.companyName ?? 'Company'} • ${session.sessionDate != null ? session.sessionDate.toString().split(' ')[0] : 'Date'}',
                         ),
-                        trailing: Icon(Icons.chevron_right),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (session.sessionDate != null)
+                              Container(
+                                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                margin: EdgeInsets.only(right: 8),
+                                decoration: BoxDecoration(
+                                  color: session.sessionDate!.year == DateTime.now().year
+                                      ? Colors.green.withOpacity(0.1)
+                                      : Colors.grey.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  session.sessionDate!.year.toString(),
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: session.sessionDate!.year == DateTime.now().year
+                                        ? Colors.green
+                                        : Colors.grey[600],
+                                  ),
+                                ),
+                              ),
+                            Icon(Icons.chevron_right),
+                          ],
+                        ),
                         onTap: () {
-                          // Set as current session
-                          if (session.id != null) {
-                            sessionProvider.setCurrentSession(session.id);
+                          if (session.id != null && !isCurrentSession) {
+                            String sessionYear = session.sessionDate?.year?.toString() ?? 
+                                                sessionProvider.selectedYear;
+                            sessionProvider.setCurrentSession(session.id, year: sessionYear);
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('Session activated: ${session.sessionName}'),
+                                content: Text('Session activated: ${session.sessionName} (${sessionYear})'),
                                 backgroundColor: Colors.green,
                               ),
                             );
@@ -486,6 +830,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
         );
       },
     );
+  }
+
+  void _loadAllYearsSessions() {
+    final authProvider = context.read<AuthProvider>();
+    final sessionProvider = context.read<SessionProvider>();
+    
+    if (authProvider.user != null) {
+      sessionProvider.loadAllAdminSessions(authProvider.user!.uid);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Loading sessions from all years...'),
+          backgroundColor: Colors.blue,
+        ),
+      );
+    }
   }
 
   void _showProfileDialog() {
@@ -585,5 +944,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ],
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    // **FIXED: Safe disposal**
+    try {
+      final attendanceProvider = Provider.of<AttendanceProvider>(context, listen: false);
+      attendanceProvider.stopListeningToAttendance();
+    } catch (e) {
+      // Provider might not be available during disposal
+      debugPrint('Could not stop listening to attendance: $e');
+    }
+    super.dispose();
   }
 }

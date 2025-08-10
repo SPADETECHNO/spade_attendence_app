@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/firestore_service.dart';
 import '../services/location_service.dart';
 import '../models/attendance_model.dart';
@@ -9,6 +11,7 @@ import 'package:location/location.dart';
 class AttendanceProvider extends ChangeNotifier {
   final FirestoreService _firestoreService = FirestoreService();
   final LocationService _locationService = LocationService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   List<AttendanceModel> _attendanceRecords = [];
   bool _isLoading = false;
@@ -16,6 +19,11 @@ class AttendanceProvider extends ChangeNotifier {
   String? _lastScannedData;
   bool _isScanning = false;
   AuthProvider? _authProvider;
+  
+  // Performance optimization properties
+  StreamSubscription<List<AttendanceModel>>? _attendanceSubscription;
+  Timer? _batchTimer;
+  List<AttendanceModel> _pendingAttendances = [];
 
   // Getters
   List<AttendanceModel> get attendanceRecords => _attendanceRecords;
@@ -25,15 +33,12 @@ class AttendanceProvider extends ChangeNotifier {
   bool get isScanning => _isScanning;
   String? get currentAdminId => _authProvider?.user?.uid;
 
-  // Submit attendance record
+  // **OPTIMIZED: Submit attendance record with batching**
   Future<bool> submitAttendanceRecord({
     required String scannedData,
     required String sessionId,
     String? adminId,
   }) async {
-    _setLoading(true);
-    _clearError();
-
     try {
       // Use provided adminId or get from auth provider
       String finalAdminId = adminId ?? _authProvider?.user?.uid ?? '';
@@ -46,7 +51,6 @@ class AttendanceProvider extends ChangeNotifier {
       LocationData? location = await _locationService.getCurrentLocation();
       if (location == null) {
         _setError('Failed to get location. Please enable location services.');
-        _setLoading(false);
         return false;
       }
 
@@ -61,31 +65,92 @@ class AttendanceProvider extends ChangeNotifier {
         isVerified: true,
       );
 
-      String recordId = await _firestoreService.createAttendanceRecord(
-        attendance,
-      );
-
-      // Add to local list
-      AttendanceModel newRecord = attendance.copyWith(id: recordId);
-      _attendanceRecords.insert(0, newRecord);
+      // Add to pending batch
+      _pendingAttendances.add(attendance);
+      
+      // Cancel existing timer
+      _batchTimer?.cancel();
+      
+      // Set timer to submit batch after 2 seconds
+      _batchTimer = Timer(const Duration(seconds: 2), () {
+        _submitPendingAttendances();
+      });
+      
+      // If batch is full, submit immediately
+      if (_pendingAttendances.length >= 5) {
+        _batchTimer?.cancel();
+        await _submitPendingAttendances();
+      }
 
       _lastScannedData = scannedData;
-      _setLoading(false);
-      notifyListeners();
       return true;
     } catch (e) {
       _setError(e.toString());
-      _setLoading(false);
       return false;
     }
   }
 
-  // Load session attendance records
-  void loadSessionAttendance(String sessionId) {
-    _firestoreService.getSessionAttendance(sessionId).listen((records) {
-      _attendanceRecords = records;
+  // **NEW: Batch submission for better performance**
+  Future<void> _submitPendingAttendances() async {
+    if (_pendingAttendances.isEmpty) return;
+
+    _setLoading(true);
+    try {
+      await submitAttendanceBatch(List.from(_pendingAttendances));
+      _pendingAttendances.clear();
+      _clearError();
+    } catch (e) {
+      _setError('Failed to submit batch attendance: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  // **NEW: Batch Firestore operations for better performance**
+  Future<void> submitAttendanceBatch(List<AttendanceModel> attendances) async {
+    if (attendances.isEmpty) return;
+
+    try {
+      WriteBatch batch = _firestore.batch();
+      
+      for (var attendance in attendances) {
+        DocumentReference ref = _firestore.collection('attendance').doc();
+        batch.set(ref, attendance.toFirestore());
+      }
+      
+      await batch.commit();
+      
+      // Update local list
+      for (var attendance in attendances) {
+        _attendanceRecords.insert(0, attendance.copyWith(id: DateTime.now().millisecondsSinceEpoch.toString()));
+      }
       notifyListeners();
-    });
+      
+    } catch (e) {
+      print('Batch submission error: $e');
+      rethrow;
+    }
+  }
+
+  // **OPTIMIZED: Load session attendance records with proper cleanup**
+  void loadSessionAttendance(String sessionId) {
+    _attendanceSubscription?.cancel();
+    
+    _attendanceSubscription = _firestoreService.getSessionAttendance(sessionId).listen(
+      (records) {
+        _attendanceRecords = records;
+        notifyListeners();
+      },
+      onError: (error) {
+        _setError('Real-time update error: $error');
+      },
+    );
+  }
+
+  // **NEW: Stop listening to attendance updates**
+  void stopListeningToAttendance() {
+    _attendanceSubscription?.cancel();
+    _attendanceSubscription = null;
   }
 
   // Load attendance by date range
@@ -121,81 +186,139 @@ class AttendanceProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Process scanned QR/Barcode data
+  // **ENHANCED: Process scanned QR/Barcode data with better validation**
   Map<String, dynamic> processScannedData(String rawData) {
     try {
+      String? studentId = _extractStudentId(rawData);
+      String? studentName = _extractStudentName(rawData);
+      bool isValid = _validateScannedData(rawData);
+
       Map<String, dynamic> processedData = {
         'rawData': rawData,
-        'studentId': _extractStudentId(rawData),
-        'studentName': _extractStudentName(rawData),
-        'isValid': _validateScannedData(rawData),
+        'studentId': studentId,
+        'studentName': studentName,
+        'isValid': isValid,
         'scannedAt': DateTime.now().toIso8601String(),
+        'type': _determineDataType(rawData),
       };
 
       return processedData;
     } catch (e) {
       return {
         'rawData': rawData,
-        'error': 'Failed to process data',
+        'error': 'Failed to process data: $e',
         'isValid': false,
+        'type': 'error',
       };
     }
   }
 
-  // Validate scanned data
+  // **NEW: Determine data type**
+  String _determineDataType(String data) {
+    if (data.startsWith('{') && data.endsWith('}')) return 'json';
+    if (data.contains('@')) return 'email';
+    if (data.contains('|')) return 'delimited';
+    if (RegExp(r'^\d+$').hasMatch(data)) return 'numeric';
+    return 'text';
+  }
+
+  // **ENHANCED: Validate scanned data with better patterns**
   bool _validateScannedData(String data) {
     if (data.isEmpty) return false;
-    return true;
+    
+    // Enhanced validation patterns
+    String? studentId = _extractStudentId(data);
+    if (studentId == null || studentId.isEmpty) return false;
+    
+    // Check for valid student ID patterns
+    RegExp emailPattern = RegExp(r'^\d{8,12}@[a-zA-Z]+\.[a-zA-Z]+\.[a-zA-Z]+$');
+    RegExp numericPattern = RegExp(r'^\d{6,12}$');
+    
+    return emailPattern.hasMatch(studentId) || numericPattern.hasMatch(studentId);
   }
 
-  // Extract student ID from scanned data
+  // **ENHANCED: Extract student ID with multiple format support**
   String? _extractStudentId(String data) {
+    // Handle email format (e.g., "202411032@dau.ac.in")
+    RegExp emailPattern = RegExp(r'(\d{8,12}@[a-zA-Z]+\.[a-zA-Z]+\.[a-zA-Z]+)');
+    Match? emailMatch = emailPattern.firstMatch(data);
+    if (emailMatch != null) {
+      return emailMatch.group(1);
+    }
+
+    // Handle "STUDENT_ID:12345" format
     if (data.contains('STUDENT_ID:')) {
-      return data.split('STUDENT_ID:')[1].split('|')[0];
+      String id = data.split('STUDENT_ID:')[1].split('|')[0].trim();
+      return id.isNotEmpty ? id : null;
     }
 
+    // Handle delimited format with |
     if (data.contains('|')) {
       List<String> parts = data.split('|');
-      if (parts.isNotEmpty) {
-        return parts[0];
+      if (parts.isNotEmpty && parts[0].isNotEmpty) {
+        return parts[0].trim();
       }
     }
 
-    return data;
-  }
+    // Handle pure numeric format
+    RegExp numericPattern = RegExp(r'^\d{6,12}$');
+    if (numericPattern.hasMatch(data.trim())) {
+      return data.trim();
+    }
 
-  // Extract student name from scanned data
-  String? _extractStudentName(String data) {
-    if (data.contains('|')) {
-      List<String> parts = data.split('|');
-      if (parts.length > 1) {
-        return parts[1];
-      }
+    // Extract numeric part from mixed data
+    RegExp extractNumeric = RegExp(r'\d{6,12}');
+    Match? numericMatch = extractNumeric.firstMatch(data);
+    if (numericMatch != null) {
+      return numericMatch.group(0);
     }
 
     return null;
   }
 
-  // Extract additional student info
+  // **ENHANCED: Extract student name with better parsing**
+  String? _extractStudentName(String data) {
+    if (data.contains('|')) {
+      List<String> parts = data.split('|');
+      if (parts.length > 1 && parts[1].isNotEmpty) {
+        return parts[1].trim();
+      }
+    }
+
+    // Handle NAME: format
+    if (data.contains('NAME:')) {
+      String name = data.split('NAME:')[1].split('|')[0].trim();
+      return name.isNotEmpty ? name : null;
+    }
+
+    return null;
+  }
+
+  // **ENHANCED: Extract additional student info**
   String? _extractStudentInfo(String data) {
     Map<String, dynamic> processed = processScannedData(data);
 
-    String info = '';
+    List<String> info = [];
+    
     if (processed['studentId'] != null) {
-      info += 'ID: ${processed['studentId']}';
+      info.add('ID: ${processed['studentId']}');
     }
     if (processed['studentName'] != null) {
-      info += '\nName: ${processed['studentName']}';
+      info.add('Name: ${processed['studentName']}');
+    }
+    if (processed['type'] != null) {
+      info.add('Type: ${processed['type']}');
     }
 
-    return info.isNotEmpty ? info : data;
+    return info.isNotEmpty ? info.join('\n') : data;
   }
 
-  // Get attendance statistics
+  // **ENHANCED: Get attendance statistics with more metrics**
   Map<String, int> getAttendanceStats() {
+    DateTime now = DateTime.now();
+    
     int totalRecords = _attendanceRecords.length;
     int todayRecords = _attendanceRecords.where((record) {
-      DateTime now = DateTime.now();
       DateTime recordDate = record.timestamp;
       return now.year == recordDate.year &&
           now.month == recordDate.month &&
@@ -207,6 +330,8 @@ class AttendanceProvider extends ChangeNotifier {
       'today': todayRecords,
       'thisWeek': _getWeeklyCount(),
       'thisMonth': _getMonthlyCount(),
+      'verified': _getVerifiedCount(),
+      'pending': _pendingAttendances.length,
     };
   }
 
@@ -228,20 +353,27 @@ class AttendanceProvider extends ChangeNotifier {
     }).length;
   }
 
+  // **NEW: Get verified count**
+  int _getVerifiedCount() {
+    return _attendanceRecords.where((record) => record.isVerified).length;
+  }
+
   // Clear attendance records
   void clearRecords() {
     _attendanceRecords.clear();
     _lastScannedData = null;
+    _pendingAttendances.clear();
     notifyListeners();
   }
 
-  // Update method for ProxyProvider
+  // **ENHANCED: Update method for ProxyProvider with proper cleanup**
   void update(AuthProvider auth) {
     _authProvider = auth;
     
     // Clear data when user logs out
     if (!auth.isLoggedIn) {
       clearRecords();
+      stopListeningToAttendance();
     }
     
     notifyListeners();
@@ -259,5 +391,13 @@ class AttendanceProvider extends ChangeNotifier {
 
   void _clearError() {
     _error = null;
+  }
+
+  // **NEW: Proper disposal with cleanup**
+  @override
+  void dispose() {
+    _attendanceSubscription?.cancel();
+    _batchTimer?.cancel();
+    super.dispose();
   }
 }

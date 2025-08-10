@@ -16,6 +16,8 @@ class SessionProvider extends ChangeNotifier {
   String? _error;
   LocationData? _currentLocation;
   AuthProvider? _authProvider;
+  String _selectedYear = DateTime.now().year.toString();
+  List<String> _availableYears = [];
 
   // Getters
   SessionModel? get currentSession => _currentSession;
@@ -25,6 +27,8 @@ class SessionProvider extends ChangeNotifier {
   LocationData? get currentLocation => _currentLocation;
   bool get hasActiveSession => _currentSession != null;
   String? get currentAdminId => _authProvider?.user?.uid;
+  String get selectedYear => _selectedYear;
+  List<String> get availableYears => _availableYears;
 
   // Create new session
   Future<bool> createSession({
@@ -71,6 +75,10 @@ class SessionProvider extends ChangeNotifier {
       String sessionId = await _firestoreService.createSession(session);
       _currentSession = session.copyWith(id: sessionId);
 
+      // Refresh available years and sessions for current year
+      await _loadAvailableYears();
+      _loadAdminSessionsForYear(finalAdminId, sessionDate.year.toString());
+
       _setLoading(false);
       notifyListeners();
       return true;
@@ -81,25 +89,90 @@ class SessionProvider extends ChangeNotifier {
     }
   }
 
-  // Load admin sessions
+  // Load admin sessions for current selected year
   void loadAdminSessions(String? adminId) {
     String finalAdminId = adminId ?? _authProvider?.user?.uid ?? '';
     
     if (finalAdminId.isNotEmpty) {
-      _firestoreService.getAdminSessions(finalAdminId).listen((sessions) {
+      _loadAdminSessionsForYear(finalAdminId, _selectedYear);
+    }
+  }
+
+  // Load admin sessions for specific year
+  void _loadAdminSessionsForYear(String adminId, String year) {
+    _firestoreService.getAdminSessions(adminId, year).listen((sessions) {
+      _sessions = sessions;
+      notifyListeners();
+    });
+  }
+
+  // Change selected year and reload sessions
+  Future<void> changeSelectedYear(String year) async {
+    if (_selectedYear != year) {
+      _selectedYear = year;
+      String finalAdminId = _authProvider?.user?.uid ?? '';
+      
+      if (finalAdminId.isNotEmpty) {
+        _loadAdminSessionsForYear(finalAdminId, year);
+      }
+      
+      notifyListeners();
+    }
+  }
+
+  // Load available years
+  Future<void> _loadAvailableYears() async {
+    try {
+      _availableYears = await _firestoreService.getAvailableSessionYears();
+      
+      // Ensure current year is in the list
+      String currentYear = DateTime.now().year.toString();
+      if (!_availableYears.contains(currentYear)) {
+        _availableYears.insert(0, currentYear);
+      }
+      
+      notifyListeners();
+    } catch (e) {
+      print('Failed to load available years: $e');
+    }
+  }
+
+  // Load sessions across multiple years
+  Future<void> loadAllAdminSessions(String? adminId, {List<String>? years}) async {
+    String finalAdminId = adminId ?? _authProvider?.user?.uid ?? '';
+    
+    if (finalAdminId.isEmpty) return;
+
+    _setLoading(true);
+    
+    try {
+      List<String> yearsToLoad = years ?? _availableYears;
+      
+      if (yearsToLoad.isEmpty) {
+        await _loadAvailableYears();
+        yearsToLoad = _availableYears;
+      }
+
+      _firestoreService.getAdminSessionsMultipleYears(finalAdminId, yearsToLoad).listen((sessions) {
         _sessions = sessions;
+        _setLoading(false);
         notifyListeners();
       });
+    } catch (e) {
+      _setError(e.toString());
+      _setLoading(false);
     }
   }
 
   // Set current session
-  Future<void> setCurrentSession(String sessionId) async {
+  Future<void> setCurrentSession(String sessionId, {String? year}) async {
     _setLoading(true);
     _clearError();
 
     try {
-      SessionModel? session = await _firestoreService.getSession(sessionId);
+      String sessionYear = year ?? _selectedYear;
+      SessionModel? session = await _firestoreService.getSession(sessionId, sessionYear);
+      
       if (session != null) {
         _currentSession = session;
 
@@ -109,9 +182,13 @@ class SessionProvider extends ChangeNotifier {
           _currentLocation = location;
 
           // Update session with current location
-          await _firestoreService.updateSession(sessionId, {
-            'adminLocation': _locationService.positionToMap(location),
-          });
+          await _firestoreService.updateSession(
+            sessionId,
+            {
+              'adminLocation': _locationService.positionToMap(location),
+            },
+            sessionYear,
+          );
         }
       }
       _setLoading(false);
@@ -126,9 +203,14 @@ class SessionProvider extends ChangeNotifier {
   Future<void> endCurrentSession() async {
     if (_currentSession != null) {
       try {
-        await _firestoreService.updateSession(_currentSession!.id, {
-          'isActive': false,
-        });
+        String sessionYear = _currentSession!.sessionDate.year.toString();
+        await _firestoreService.updateSession(
+          _currentSession!.id,
+          {
+            'isActive': false,
+          },
+          sessionYear,
+        );
         _currentSession = null;
         _currentLocation = null;
         notifyListeners();
@@ -148,9 +230,14 @@ class SessionProvider extends ChangeNotifier {
 
         // Update session location if there's an active session
         if (_currentSession != null) {
-          await _firestoreService.updateSession(_currentSession!.id, {
-            'adminLocation': _locationService.positionToMap(location),
-          });
+          String sessionYear = _currentSession!.sessionDate.year.toString();
+          await _firestoreService.updateSession(
+            _currentSession!.id,
+            {
+              'adminLocation': _locationService.positionToMap(location),
+            },
+            sessionYear,
+          );
         }
 
         notifyListeners();
@@ -209,12 +296,16 @@ Location: ${_currentLocation != null ? _locationService.formatLocationString(_cu
     
     // Auto-load sessions when auth changes
     if (auth.isLoggedIn && auth.user?.uid != null) {
-      loadAdminSessions(auth.user!.uid);
+      _loadAvailableYears().then((_) {
+        loadAdminSessions(auth.user!.uid);
+      });
     } else {
       // Clear data when user logs out
       _sessions.clear();
       _currentSession = null;
       _currentLocation = null;
+      _availableYears.clear();
+      _selectedYear = DateTime.now().year.toString();
     }
     
     notifyListeners();

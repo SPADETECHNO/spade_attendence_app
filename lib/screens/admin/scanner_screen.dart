@@ -9,6 +9,13 @@ import '../../widgets/common/custom_button.dart';
 import 'scan_result_screen.dart';
 
 class ScannerScreen extends StatefulWidget {
+  final String sessionId; // **ADDED: Required sessionId parameter**
+
+  const ScannerScreen({
+    super.key,
+    required this.sessionId,
+  });
+
   @override
   State<ScannerScreen> createState() => _ScannerScreenState();
 }
@@ -26,11 +33,13 @@ class _ScannerScreenState extends State<ScannerScreen> {
   void _checkSessionAndLocation() async {
     final sessionProvider = Provider.of<SessionProvider>(context, listen: false);
 
-    if (!sessionProvider.hasActiveSession) {
+    // **ENHANCED: Check if current session matches the sessionId**
+    if (!sessionProvider.hasActiveSession || 
+        sessionProvider.currentSession?.id != widget.sessionId) {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('No active session. Please create a session first.'),
+          content: Text('Session not active or session mismatch. Please select a valid session.'),
           backgroundColor: Colors.red,
         ),
       );
